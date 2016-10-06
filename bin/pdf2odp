@@ -1,15 +1,48 @@
 #!/usr/bin/env python
 
-import sys, subprocess, os, glob
+import sys, subprocess, os, glob, getopt
+
+def usage():
+    usage = """
+    Usage: %s [-x|--engine=] [-s|--scale=] pdffile [outfile]
+      -h --help        Prints help
+      -x --engine      Converter engine (gs or pdftocairo), default gs
+      -s --scale       Scale value, default 300
+    """
+    print usage %(os.path.basename(sys.argv[0]))
+
+# converter engine: gs or pdftocairo
+engine = 'gs'
+scale = 300
+pdffile = ''
+outfile = ''
+
+options, remainder = getopt.getopt(sys.argv[1:], 'hx:s:',
+                                   ['help','engine=', 'scale='])
+
+for opt, arg in options:
+    if opt in ('-x', '--engine'):
+        engine = arg
+    elif opt in ('-s', '--scale'):
+        scale = arg
+    elif opt in ('-h', '--help'):
+        usage()
+        sys.exit()
+
+if len(remainder) > 0:
+    pdffile = remainder[0]
+if len(remainder) > 1:
+    outfile = remainder[1]
+
 # Check for odfpy and file argument
 try:
     from odf.opendocument import OpenDocumentPresentation
-    filename = sys.argv[1]
+    filename = pdffile
 except ImportError:
     print "You need odfpy, exiting."
     sys.exit(1)
 except IndexError:
-    print "Usage: %s pdfile [outfile]" %sys.argv[0]
+    usage()
     sys.exit(2)
 
 from odf.style import Style, MasterPage, PageLayout, PageLayoutProperties, \
@@ -27,21 +60,32 @@ if ext != '.pdf':
     print "%s only accepts pdf files, exiting." %sys.argv[0]
     sys.exit(4)
 
-# Check for gs
+# Check for converter engine
 try:
-    subprocess.call(['gs', '-v'], stdout=subprocess.PIPE)
+    if engine == 'pdftocairo':
+        subprocess.call(['pdftocairo', '-v'], stdout=subprocess.PIPE)
+    else:
+        subprocess.call(['gs', '-v'], stdout=subprocess.PIPE)
 except OSError:
-    print "You need Ghostscript, exiting."
+    if engine == 'pdftocairo':
+        print "You need Poppler utils, exiting."
+    else:
+        print "You need Ghostscript, exiting."
     sys.exit(5)
 
-gs_args = ['gs', '-dNOPAUSE', '-dSAFER', '-dBATCH', '-sDEVICE=pngalpha',
-           '-r300', '-sOutputFile=tmp_%s_%%03d.png' %(file), filename]
+if engine == 'pdftocairo':
+    engine_args = ['pdftocairo', '-png', '-scale-to', '%s' %(scale), filename,
+                   'tmp_%s_' %(file)]
+else:
+    engine_args = ['gs', '-dNOPAUSE', '-dSAFER', '-dBATCH',
+                   '-sDEVICE=pngalpha', '-r%s' %(scale),
+                   '-sOutputFile=tmp_%s_%%03d.png' %(file), filename]
            
-# Try to run gs
-print 'Converting %s to images using gs\n' %filename
-result = subprocess.Popen(gs_args)
+# Try to run converter engine
+print 'Converting %s to images using %s\n' %(filename, engine)
+result = subprocess.Popen(engine_args)
 if result.wait():
-    print '\nRunning gs failed with the error above, exiting.'
+    print '\nRunning %s failed with the error above, exiting.' %engine
     sys.exit(6)
 
 print "\nDone..."
@@ -90,7 +134,7 @@ for slide in slides:
     imageframe.addElement(Image(href=href))
 
 # Save file
-file = os.path.splitext(sys.argv[2])[0] if len(sys.argv) > 2 else file
+file = os.path.splitext(outfile)[0] if len(outfile) > 0 else file
 doc.save(file, True)
 print "Presentation saved as %s.odp" %file
 
